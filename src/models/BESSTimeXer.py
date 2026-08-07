@@ -4,7 +4,7 @@ from torch import cat, from_numpy, Tensor, zeros_like
 from torch.nn import L1Loss
 from torch.optim import Adam
 
-from src.metrics import regret as regret_metric
+from src.metrics import corr_f as corr_f_metric, regret as regret_metric
 from src.utils import BESSSchedulingOptModel
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
@@ -85,13 +85,14 @@ class BESSTimeXer(LightningModule):
         # Calculate validation metrics.
         outputs, batch_y = self._truncate_predictions(outputs, batch_y)
         loss = self.criterion(outputs, batch_y).item()
-        mae, rmse, regret = self._shared_eval_step(outputs, batch_y)
+        mae, rmse, corr_f, regret = self._shared_eval_step(outputs, batch_y)
 
         # Log validation metrics.
         metrics = {
             'val_loss': loss,
             'val_mae': mae,
             'val_rmse': rmse,
+            'val_corr_f': corr_f,
             'val_regret': regret,
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -104,12 +105,13 @@ class BESSTimeXer(LightningModule):
 
         # Calculate evaluation metrics.
         outputs, batch_y = self._truncate_predictions(outputs, batch_y)
-        mae, rmse, regret = self._shared_eval_step(outputs, batch_y)
+        mae, rmse, corr_f, regret = self._shared_eval_step(outputs, batch_y)
 
         # Log evaluation metrics.
         metrics = {
             'test_mae': mae,
             'test_rmse': rmse,
+            'test_corr_f': corr_f,
             'test_regret': regret,
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -147,7 +149,7 @@ class BESSTimeXer(LightningModule):
             self,
             outputs: Tensor,
             batch_y: Tensor,
-    ) -> tuple[float, float, float]:
+    ) -> tuple[float, float, float, float]:
         # Convert tensors to numpy Arrays.
         preds, true = [
             tensor.cpu().detach().numpy()
@@ -155,7 +157,7 @@ class BESSTimeXer(LightningModule):
         ]
 
         # Calculate accuracy metrics.
-        mae, rmse = MAE(preds, true), RMSE(preds, true)
+        mae, rmse, corr_f = MAE(preds, true), RMSE(preds, true), corr_f_metric(preds, true)
 
         # Re-scale true and predicted values to original scale for further metrics.
         if self.scaler and self.inverse:
@@ -165,7 +167,7 @@ class BESSTimeXer(LightningModule):
         preds_prices, true_prices = [ tensor[:, :, -1].cpu().detach().numpy() for tensor in (outputs, batch_y) ]
         regret = regret_metric(preds_prices, true_prices, self.optModel)
 
-        return mae, rmse, regret
+        return mae, rmse, corr_f, regret
 
     def _rescale_predictions(self, tensor: Tensor) -> Tensor:
         mean = from_numpy(self.scaler.mean_[self.f_dim:]).to(tensor.device, dtype=tensor.dtype)
