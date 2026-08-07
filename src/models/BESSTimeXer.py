@@ -10,6 +10,7 @@ from src.metrics import (
     cov_e as cov_e_metric,
     regret as regret_metric
 )
+from src.losses import SPOPlus
 from src.utils import BESSSchedulingOptModel
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
@@ -48,7 +49,10 @@ class BESSTimeXer(LightningModule):
         self.scaler = scaler
         self.learning_rate = learning_rate
         self.optModel = BESSSchedulingOptModel(num_timesteps=pred_len)
-        self.criterion = L1Loss() # L1Loss == MAE
+        if loss.lower() in  ('spo+', 'spoplus'):
+            self.criterion = SPOPlus(optmodel=self.optModel)
+        else:
+            self.criterion = L1Loss() # L1Loss == MAE
         return
 
     def configure_optimizers(self):
@@ -78,7 +82,14 @@ class BESSTimeXer(LightningModule):
 
         # Calculate loss.
         outputs, batch_y = self._truncate_predictions(outputs, batch_y)
-        loss = self.criterion(outputs, batch_y)
+        if isinstance(self.criterion, SPOPlus):
+            # Re-scale prices to original prices for correct optimization.
+            if self.scaler and self.inverse:
+                outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
+            preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
+            loss = self.criterion(preds_prices, true_prices)
+        else:
+            loss = self.criterion(outputs, batch_y)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
         return loss
 
@@ -89,7 +100,14 @@ class BESSTimeXer(LightningModule):
 
         # Calculate validation metrics.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        loss = self.criterion(outputs, batch_y).item()
+        if isinstance(self.criterion, SPOPlus) and self.scaler and self.inverse:
+            if self.scaler and self.inverse:
+                # Re-scale prices to original prices for correct optimization.
+                outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
+            preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
+            loss = self.criterion(preds_prices, true_prices).item()
+        else:
+            loss = self.criterion(outputs, batch_y).item()
         mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
 
         # Log validation metrics.
