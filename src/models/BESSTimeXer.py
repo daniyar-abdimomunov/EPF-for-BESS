@@ -10,7 +10,7 @@ from src.metrics import (
     cov_e as cov_e_metric,
     regret as regret_metric
 )
-from src.losses import CorrFLoss, SPOPlus
+from src.losses import CorrFLoss, CovELoss, SPOPlus
 from src.utils import BESSSchedulingOptModel
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
@@ -53,6 +53,8 @@ class BESSTimeXer(LightningModule):
             self.criterion = SPOPlus(optmodel=self.optModel)
         elif loss.lower() in ('corrf', 'corr-f'):
             self.criterion = CorrFLoss()
+        elif loss.lower() in ('cove', 'cov-e'):
+            self.criterion = CovELoss()
         else:
             self.criterion = L1Loss() # L1Loss == MAE
         return
@@ -83,13 +85,17 @@ class BESSTimeXer(LightningModule):
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate loss.
-        outputs, batch_y = self._truncate_predictions(outputs, batch_y)
+        outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
         if isinstance(self.criterion, SPOPlus):
             # Re-scale prices to original prices for correct optimization.
             if self.scaler and self.inverse:
                 outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
             preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
             loss = self.criterion(preds_prices, true_prices)
+        elif isinstance(self.criterion, CovELoss):
+            hour_of_day = batch_y_mark[:, :, 0]
+            outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
+            loss = self.criterion(outputs_aligned, batch_y_aligned)
         else:
             loss = self.criterion(outputs, batch_y)
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
@@ -108,6 +114,10 @@ class BESSTimeXer(LightningModule):
                 outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
             preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
             loss = self.criterion(preds_prices, true_prices).item()
+        elif isinstance(self.criterion, CovELoss):
+            hour_of_day = batch_y_mark[:, :, 0]
+            outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
+            loss = self.criterion(outputs_aligned, batch_y_aligned).item()
         else:
             loss = self.criterion(outputs, batch_y).item()
         mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
