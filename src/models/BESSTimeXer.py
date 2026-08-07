@@ -10,7 +10,7 @@ from src.metrics import (
     cov_e as cov_e_metric,
     regret as regret_metric
 )
-from src.losses import SPOPlus
+from src.losses import CorrFLoss, SPOPlus
 from src.utils import BESSSchedulingOptModel
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
@@ -54,6 +54,8 @@ class BESSTimeXer(LightningModule):
 
         if loss.lower() in  ('spo+', 'spoplus'):
             self.criterion = SPOPlus(optmodel=self.optModel)
+        elif loss.lower() in ('corrf', 'corr-f'):
+            self.criterion = CorrFLoss()
         else:
             self.criterion = L1Loss() # L1Loss == MAE
         return
