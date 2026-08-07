@@ -1,8 +1,13 @@
 einops
+highspy
+jupyter
+jupyterlab
 matplotlib
 numpy
 pandas
 patool
+pyepo
+pyomo
 reformer_pytorch
 scikit-learn
 sktime
