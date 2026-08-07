@@ -2,6 +2,7 @@ einops
 highspy
 jupyter
 jupyterlab
+lightning
 matplotlib
 numpy
 pandas
