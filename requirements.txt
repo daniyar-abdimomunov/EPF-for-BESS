@@ -1,0 +1,10 @@
+einops
+matplotlib
+numpy
+pandas
+patool
+reformer_pytorch
+scikit-learn
+sktime
+torch
+tqdm
