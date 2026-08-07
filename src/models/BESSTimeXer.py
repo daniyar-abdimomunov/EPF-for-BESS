@@ -1,10 +1,15 @@
 from argparse import Namespace
 from lightning import LightningModule
-from torch import cat, from_numpy, Tensor, zeros_like
+from torch import argsort, cat, from_numpy, take_along_dim, Tensor, zeros_like
 from torch.nn import L1Loss
 from torch.optim import Adam
+from typing import Optional
 
-from src.metrics import corr_f as corr_f_metric, regret as regret_metric
+from src.metrics import (
+    corr_f as corr_f_metric,
+    cov_e as cov_e_metric,
+    regret as regret_metric
+)
 from src.utils import BESSSchedulingOptModel
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
@@ -83,9 +88,9 @@ class BESSTimeXer(LightningModule):
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate validation metrics.
-        outputs, batch_y = self._truncate_predictions(outputs, batch_y)
+        outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
         loss = self.criterion(outputs, batch_y).item()
-        mae, rmse, corr_f, regret = self._shared_eval_step(outputs, batch_y)
+        mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
 
         # Log validation metrics.
         metrics = {
@@ -93,6 +98,7 @@ class BESSTimeXer(LightningModule):
             'val_mae': mae,
             'val_rmse': rmse,
             'val_corr_f': corr_f,
+            'val_cov_e': cov_e,
             'val_regret': regret,
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -104,14 +110,15 @@ class BESSTimeXer(LightningModule):
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate evaluation metrics.
-        outputs, batch_y = self._truncate_predictions(outputs, batch_y)
-        mae, rmse, corr_f, regret = self._shared_eval_step(outputs, batch_y)
+        outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
+        mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
 
         # Log evaluation metrics.
         metrics = {
             'test_mae': mae,
             'test_rmse': rmse,
             'test_corr_f': corr_f,
+            'test_cov_e': cov_e,
             'test_regret': regret,
         }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -137,19 +144,24 @@ class BESSTimeXer(LightningModule):
             self,
             outputs: Tensor,
             batch_y: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+            batch_y_mark: Optional[Tensor] = None,
+    ) -> tuple[Tensor, ...]:
         # Truncate output to only include predictions and
         # depending on whether predictions are univariate or multivariate.
         outputs = outputs[:, -self.pred_len:, self.f_dim:]
         batch_y = batch_y[:, -self.pred_len:, self.f_dim:]
 
-        return outputs, batch_y
+        # Truncate time encodings to only include encodings for predicted period_truncate_predictions
+        batch_y_mark = batch_y_mark[:, -self.pred_len:, :] if batch_y_mark is not None else None
+
+        return tuple(tensor for tensor in [outputs, batch_y, batch_y_mark] if tensor is not None)
 
     def _shared_eval_step(
             self,
             outputs: Tensor,
             batch_y: Tensor,
-    ) -> tuple[float, float, float, float]:
+            batch_y_mark: Tensor,
+    ) -> tuple[float, float, float, float, float]:
         # Convert tensors to numpy Arrays.
         preds, true = [
             tensor.cpu().detach().numpy()
@@ -163,11 +175,17 @@ class BESSTimeXer(LightningModule):
         if self.scaler and self.inverse:
             outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
 
+        # Align true and predicted values by hour of day, to calculate cov-e
+        hour_of_day = batch_y_mark[:, :, 0]
+        outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
+        preds_aligned, true_aligned = [ tensor.cpu().detach().numpy() for tensor in (outputs_aligned, batch_y_aligned) ]
+        cov_e = cov_e_metric(preds_aligned, true_aligned)
+
         # Extract only prices from tensors and convert to numpy Arrays.
         preds_prices, true_prices = [ tensor[:, :, -1].cpu().detach().numpy() for tensor in (outputs, batch_y) ]
         regret = regret_metric(preds_prices, true_prices, self.optModel)
 
-        return mae, rmse, corr_f, regret
+        return mae, rmse, corr_f, cov_e, regret
 
     def _rescale_predictions(self, tensor: Tensor) -> Tensor:
         mean = from_numpy(self.scaler.mean_[self.f_dim:]).to(tensor.device, dtype=tensor.dtype)
@@ -176,5 +194,21 @@ class BESSTimeXer(LightningModule):
         tensor = tensor * scale + mean
 
         return tensor
+
+    def _align_values(
+            self,
+            index: Tensor,
+            *tensors: Tensor,
+    ) -> tuple[Tensor, ...]:
+        # Get indices based on e.g. hour of day.
+        indices = argsort(index, dim=1)
+
+        # Expand indices if tensors are 3-dimensional.
+        if all([tensor.dim() == 3 for tensor in tensors]):
+            indices = indices[:, :, None]
+
+        # Sort tensors by indices.
+        tensors = tuple(take_along_dim(tensor.cpu(), indices.cpu(), dim=1) for tensor in tensors)
+        return tensors
 
 
