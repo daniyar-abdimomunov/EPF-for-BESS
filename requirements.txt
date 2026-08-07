@@ -4,6 +4,7 @@ jupyter
 jupyterlab
 lightning
 matplotlib
+mlflow
 numpy
 pandas
 patool

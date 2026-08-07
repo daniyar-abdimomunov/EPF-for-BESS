@@ -26,3 +26,24 @@ DATA_CONFIG = {
     'num_workers': 4,
     'augmentation_ratio': 0,
 }
+# =============================================================================
+# MODEL PARAMETERS
+# =============================================================================
+MODEL_CONFIG = {
+    **DATA_CONFIG,
+    'inverse': True,
+    'output_attention': False,
+    'loss': 'mae',
+    'task_name': 'long_term_forecast',  # Primary mode for sequential prediction
+    'use_norm': 1, # Boolean value for normalization
+    'patch_len': 24,  # Patch size: 24 (Matches the 24h daily price cycle), default = 16
+    'd_model': 512,  # d_model=64,  # Dimension size for core embeddings, default=512
+    'dropout': 0.1,  # Dropout rate to combat overfitting
+    'factor': 1,  # ProbSparse attention probing factor, default = 1
+    'n_heads': 8,  # Attention heads, default = 8
+    'd_ff': 2048,  #d_ff=128,  # Dimension size of feed-forward layers, default = 2048
+    'activation':'gelu',  # Activation function mapping
+    'e_layers': 2,  # Number of encoder processing layers
+    'enc_in': 3, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+    'learning_rate': 1e-4,
+}
