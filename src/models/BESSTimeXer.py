@@ -51,8 +51,10 @@ class BESSTimeXer(LightningModule):
         self.scaler = scaler
         self.learning_rate = learning_rate
         self.optModel = BESSSchedulingOptModel(num_timesteps=pred_len)
+        self.loss_name = loss
+        self.penalty_name = penalty
         self.penalty_lambda = penalty_lambda
-        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, penalty, self.penalty_lambda)
+        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name, self.penalty_lambda)
         self.current_phase = 'pretrain'
         return
 
@@ -153,7 +155,30 @@ class BESSTimeXer(LightningModule):
         return preds_prices, true_prices
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.learning_rate)
+        trainable_params = filter(lambda p: p.requires_grad, self.parameters())
+        return Adam(trainable_params, lr=self.learning_rate, weight_decay=1e-3)
+
+    def set_phase(
+            self,
+            phase: str,
+            lr: Optional[float] = 1e-5,
+            loss: Optional[str] = None,
+            penalty: Optional[str] = None,
+            penalty_lambda: Optional[float] = None
+    ):
+        self.current_phase = phase
+        self.learning_rate = lr
+        self.loss_name = loss if loss is not None else self.loss_name
+        self.penalty_name = penalty if penalty is not None else self.penalty_name
+        self.penalty_lambda = penalty_lambda if penalty_lambda is not None else self.penalty_lambda
+        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name,
+                                                                             self.penalty_lambda)
+        if phase == 'finetune':
+            for param in self.model.parameters():
+                param.requires_grad = False
+            for param in self.model.head.parameters():
+                param.requires_grad = True
+        return
 
     def forward(
             self,
