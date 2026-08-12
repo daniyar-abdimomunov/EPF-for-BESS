@@ -54,3 +54,27 @@ MODEL_CONFIG = {
     'e_layers': 2,  # Number of encoder processing layers
     'learning_rate': 1e-4,
 }
+
+# =============================================================================
+# COV-E PENALISED MODEL PARAMETERS
+# =============================================================================
+COV_E_PENALTY_CONFIG = {
+    'penalty': 'cov-e',
+    'penalty_lambda': 0.001,
+}
+
+# =============================================================================
+# CORR-F PENALISED MODEL PARAMETERS
+# =============================================================================
+CORR_F_PENALTY_CONFIG = {
+    'penalty': 'corr-f',
+    'penalty_lambda': 1,
+}
+
+# =============================================================================
+# SPOPLUS PENALISED MODEL PARAMETERS
+# =============================================================================
+SPOPLUS_PENALTY_CONFIG = {
+    'penalty': 'spo+',
+    'penalty_lambda': 0.0001,
+}
