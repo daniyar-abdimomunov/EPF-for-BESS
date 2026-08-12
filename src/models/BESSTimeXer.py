@@ -11,7 +11,7 @@ from src.metrics import (
     regret as regret_metric
 )
 from src.losses import CorrFLoss, CovELoss, SPOPlus
-from src.utils import BESSSchedulingOptModel
+from src.utils import BESSSchedulingOptModel, TrainingMode
 from timexer.models.TimeXer import Model
 from timexer.utils.metrics import MAE, RMSE
 
@@ -54,8 +54,11 @@ class BESSTimeXer(LightningModule):
         kwargs.update({'H': self.pred_len})
         self.optModel = BESSSchedulingOptModel(**kwargs)
 
+        self.loss_name = loss
+        self.penalty_name = penalty
         self.penalty_lambda = penalty_lambda
-        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(loss, penalty, self.penalty_lambda)
+        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name, self.penalty_lambda)
+        self.current_phase = TrainingMode.TRAIN
         return
 
     def _construct_loss_fn(self, loss_name: str, penalty_name: Optional[str], penalty_lambda: Optional[float]):
@@ -155,7 +158,30 @@ class BESSTimeXer(LightningModule):
         return preds_prices, true_prices
 
     def configure_optimizers(self):
-        return Adam(self.parameters(), lr=self.learning_rate)
+        trainable_params = filter(lambda p: p.requires_grad, self.parameters())
+        return Adam(trainable_params, lr=self.learning_rate, weight_decay=1e-3)
+
+    def set_phase(
+            self,
+            phase: TrainingMode,
+            lr: Optional[float] = 1e-5,
+            loss: Optional[str] = None,
+            penalty: Optional[str] = None,
+            penalty_lambda: Optional[float] = None
+    ):
+        self.current_phase = phase
+        self.learning_rate = lr
+        self.loss_name = loss if loss is not None else self.loss_name
+        self.penalty_name = penalty if penalty is not None else self.penalty_name
+        self.penalty_lambda = penalty_lambda if penalty_lambda is not None else self.penalty_lambda
+        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name,
+                                                                             self.penalty_lambda)
+        if phase == TrainingMode.FINETUNE:
+            for param in self.model.parameters():
+                param.requires_grad = False
+            for param in self.model.head.parameters():
+                param.requires_grad = True
+        return
 
     def forward(
             self,
