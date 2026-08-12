@@ -1,9 +1,9 @@
 from argparse import Namespace
 from lightning import LightningModule
 from torch import argsort, cat, from_numpy, take_along_dim, Tensor, zeros_like
-from torch.nn import L1Loss
+from torch.nn import L1Loss, Module
 from torch.optim import Adam
-from typing import Optional
+from typing import Callable, Optional
 
 from src.metrics import (
     corr_f as corr_f_metric,
@@ -25,6 +25,8 @@ class BESSTimeXer(LightningModule):
             inverse: bool = False,
             output_attention: bool = False,
             loss: str = 'mae',
+            penalty: Optional[str] = None,
+            penalty_lambda: Optional[float] = None,
             scaler = None,
             learning_rate: float = 1e-4,
             **kwargs,
@@ -49,15 +51,106 @@ class BESSTimeXer(LightningModule):
         self.scaler = scaler
         self.learning_rate = learning_rate
         self.optModel = BESSSchedulingOptModel(num_timesteps=pred_len)
-        if loss.lower() in  ('spo+', 'spoplus'):
-            self.criterion = SPOPlus(optmodel=self.optModel)
-        elif loss.lower() in ('corrf', 'corr-f'):
-            self.criterion = CorrFLoss()
-        elif loss.lower() in ('cove', 'cov-e'):
-            self.criterion = CovELoss()
-        else:
-            self.criterion = L1Loss() # L1Loss == MAE
+        self.penalty_lambda = penalty_lambda
+        self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, penalty, self.penalty_lambda)
+        self.current_phase = 'pretrain'
         return
+
+    def _construct_loss_fn(self, loss_name: str, penalty_name: Optional[str], penalty_lambda: Optional[float]):
+        criterion, _criterion_fn = self._get_criterion(loss_name)
+        def loss_fn(
+                outputs: Tensor,
+                batch_y: Tensor,
+                flag: str = 'train',
+                *args: Tensor,
+                **kwargs: Tensor,
+        ) -> dict[str, Tensor]:
+            loss_value = _criterion_fn(outputs, batch_y, *args, **kwargs)
+            loss_value = loss_value.item() if flag == 'val' else loss_value
+            return {
+                f'{flag}_loss': loss_value,
+            }
+
+        if not penalty_name or not penalty_lambda:
+            return loss_fn, criterion, None
+
+        penalty_name, _penalty_fn = self._get_criterion(penalty_name)
+        def composite_loss_fn(
+                outputs: Tensor,
+                batch_y: Tensor,
+                flag: str = 'train',
+                *args: Tensor,
+                **kwargs: Tensor,
+        ) -> dict[str, Tensor]:
+            base_loss_value = _criterion_fn(outputs, batch_y, *args, **kwargs)
+            penalty_value = penalty_lambda * _penalty_fn(outputs, batch_y, *args, **kwargs)
+            loss_value = base_loss_value + penalty_value
+            if flag == 'val':
+                loss_value, base_loss_value, penalty_value = [value.item() for value in (loss_value, base_loss_value, penalty_value)]
+            return {
+                f'{flag}_loss': loss_value,
+                f'{flag}_{loss_name}': base_loss_value,
+                f'{flag}_{penalty_name}': penalty_value
+            }
+
+        return composite_loss_fn, criterion, penalty_name
+
+    def _get_criterion(self, name: str) -> (Module, Callable[[Tensor, Tensor, Optional[Tensor]], Tensor]):
+        _prepare_criterion_inputs_fn = self._pass_inputs
+        name_safe = name.lower().replace('-', '')
+        match name_safe:
+            case 'corrf':
+                criterion = CorrFLoss()
+            case 'cove':
+                criterion = CovELoss()
+                _prepare_criterion_inputs_fn = self._prepare_cove_inputs
+            case 'spo+' | 'spoplus':
+                criterion = SPOPlus(optmodel=self.optModel)
+                _prepare_criterion_inputs_fn = self._prepare_spoplus_inputs
+            case 'mae':
+                criterion = L1Loss()
+            case _:
+                raise ValueError(f'Criterion: {name} not supported.')
+
+        _criterion_fn = lambda outputs, batch_y, *args, **kwargs: (
+            criterion(*_prepare_criterion_inputs_fn(outputs, batch_y, *args, **kwargs))
+        )
+
+        return criterion, _criterion_fn
+
+    def _pass_inputs(
+            self,
+            outputs: Tensor,
+            batch_y: Tensor,
+            *args: Tensor,
+            **kwargs: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        return outputs, batch_y
+
+    def _prepare_cove_inputs(
+            self,
+            outputs: Tensor,
+            batch_y: Tensor,
+            batch_y_mark: Tensor,
+            *args: Tensor,
+            **kwargs: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        hour_of_day = batch_y_mark[:, :, 0]
+        outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
+        return outputs_aligned, batch_y_aligned
+
+    def _prepare_spoplus_inputs(
+            self,
+            outputs: Tensor,
+            batch_y: Tensor,
+            *args: Tensor,
+            **kwargs: Tensor,
+    ) -> tuple[Tensor, Tensor]:
+        # Re-scale prices to original prices for correct optimization.
+        if self.scaler and self.inverse:
+            outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
+        preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
+        return preds_prices, true_prices
 
     def configure_optimizers(self):
         return Adam(self.parameters(), lr=self.learning_rate)
@@ -86,20 +179,9 @@ class BESSTimeXer(LightningModule):
 
         # Calculate loss.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        if isinstance(self.criterion, SPOPlus):
-            # Re-scale prices to original prices for correct optimization.
-            if self.scaler and self.inverse:
-                outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
-            preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
-            loss = self.criterion(preds_prices, true_prices)
-        elif isinstance(self.criterion, CovELoss):
-            hour_of_day = batch_y_mark[:, :, 0]
-            outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
-            loss = self.criterion(outputs_aligned, batch_y_aligned)
-        else:
-            loss = self.criterion(outputs, batch_y)
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
-        return loss
+        loss_items = self.loss_fn(outputs, batch_y, batch_y_mark=batch_y_mark, flag='train')
+        self.log_dict(loss_items, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
+        return loss_items['train_loss']
 
     def validation_step(self, batch, batch_idx):
         batch_x, batch_y, batch_x_mark, batch_y_mark = batch
@@ -108,29 +190,11 @@ class BESSTimeXer(LightningModule):
 
         # Calculate validation metrics.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        if isinstance(self.criterion, SPOPlus) and self.scaler and self.inverse:
-            if self.scaler and self.inverse:
-                # Re-scale prices to original prices for correct optimization.
-                outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
-            preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
-            loss = self.criterion(preds_prices, true_prices).item()
-        elif isinstance(self.criterion, CovELoss):
-            hour_of_day = batch_y_mark[:, :, 0]
-            outputs_aligned, batch_y_aligned = self._align_values(hour_of_day, outputs, batch_y)
-            loss = self.criterion(outputs_aligned, batch_y_aligned).item()
-        else:
-            loss = self.criterion(outputs, batch_y).item()
-        mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
+        loss_items = self.loss_fn(outputs, batch_y, batch_y_mark=batch_y_mark, flag='val')
+        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, flag='val')
 
         # Log validation metrics.
-        metrics = {
-            'val_loss': loss,
-            'val_mae': mae,
-            'val_rmse': rmse,
-            'val_corr_f': corr_f,
-            'val_cov_e': cov_e,
-            'val_regret': regret,
-        }
+        metrics.update(loss_items)
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
@@ -141,16 +205,9 @@ class BESSTimeXer(LightningModule):
 
         # Calculate evaluation metrics.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        mae, rmse, corr_f, cov_e, regret = self._shared_eval_step(outputs, batch_y, batch_y_mark)
+        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, flag = 'test')
 
         # Log evaluation metrics.
-        metrics = {
-            'test_mae': mae,
-            'test_rmse': rmse,
-            'test_corr_f': corr_f,
-            'test_cov_e': cov_e,
-            'test_regret': regret,
-        }
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
@@ -191,7 +248,8 @@ class BESSTimeXer(LightningModule):
             outputs: Tensor,
             batch_y: Tensor,
             batch_y_mark: Tensor,
-    ) -> tuple[float, float, float, float, float]:
+            flag: str = 'val',
+    ) -> dict[str, float]:
         # Convert tensors to numpy Arrays.
         preds, true = [
             tensor.cpu().detach().numpy()
@@ -215,7 +273,13 @@ class BESSTimeXer(LightningModule):
         preds_prices, true_prices = [ tensor[:, :, -1].cpu().detach().numpy() for tensor in (outputs, batch_y) ]
         regret = regret_metric(preds_prices, true_prices, self.optModel)
 
-        return mae, rmse, corr_f, cov_e, regret
+        return {
+            f'{flag}_mae': mae,
+            f'{flag}_rmse': rmse,
+            f'{flag}_corr_f': corr_f,
+            f'{flag}_cov_e': cov_e,
+            f'{flag}_regret': regret,
+        }
 
     def _rescale_predictions(self, tensor: Tensor) -> Tensor:
         mean = from_numpy(self.scaler.mean_[self.f_dim:]).to(tensor.device, dtype=tensor.dtype)

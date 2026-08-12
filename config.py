@@ -47,3 +47,27 @@ MODEL_CONFIG = {
     'enc_in': 3, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
     'learning_rate': 1e-4,
 }
+
+# =============================================================================
+# COV-E PENALISED MODEL PARAMETERS
+# =============================================================================
+COV_E_CONFIG = {
+    'penalty': 'cov-e',
+    'penalty_lambda': 0.001,
+}
+
+# =============================================================================
+# CORR-F PENALISED MODEL PARAMETERS
+# =============================================================================
+CORR_F_CONFIG = {
+    'penalty': 'corr-f',
+    'penalty_lambda': 1,
+}
+
+# =============================================================================
+# SPOPLUS PENALISED MODEL PARAMETERS
+# =============================================================================
+SPOPLUS_CONFIG = {
+    'penalty': 'spo+',
+    'penalty_lambda': 0.0001,
+}
