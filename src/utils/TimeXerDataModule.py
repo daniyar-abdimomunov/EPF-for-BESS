@@ -1,7 +1,10 @@
 from argparse import Namespace
 from lightning import LightningDataModule
+from os import path
 from torch.utils.data import DataLoader
+from typing import Optional
 
+from src.utils.BESSDataset import BESSDataset
 from timexer.data_provider.data_loader import Dataset_Custom
 
 class TimeXerDataModule(LightningDataModule):
@@ -26,6 +29,7 @@ class TimeXerDataModule(LightningDataModule):
         super().__init__()
         # load in data
         self.args = Namespace(**kwargs)
+        self.kwargs = kwargs
         self.root_path = root_path
         self.data_path = data_path
         self.target = target
@@ -90,6 +94,8 @@ class TimeXerDataModule(LightningDataModule):
         )
         self.scaler = self.train.scaler
 
+        self.precompute_bess_solutions(**self.kwargs)
+
         return
 
     def train_dataloader(self):
@@ -122,5 +128,20 @@ class TimeXerDataModule(LightningDataModule):
             drop_last=self.drop_last
         )
 
+    def precompute_bess_solutions(self, cache_dir: Optional[str] = None, battery_config: Optional[dict] = None,  **kwargs):
+        # Skip if dataset has already been transformed.
+        if isinstance(self.train, BESSDataset):
+            return
+
+        # Overwrite battery_config if specified.
+        kwargs.update(battery_config if battery_config is not None else {})
+
+        # Prepare datasets with precomputed BESS solutions for each dataset.
+        cache_dir = cache_dir if cache_dir is not None else path.join(self.root_path, 'cache')
+        self.train = BESSDataset(self.train, cache_dir, **kwargs)
+        self.val = BESSDataset(self.val, cache_dir, **kwargs)
+        self.test = BESSDataset(self.test, cache_dir, **kwargs)
+
+        return
 
 

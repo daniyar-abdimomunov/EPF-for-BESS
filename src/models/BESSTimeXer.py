@@ -164,14 +164,16 @@ class BESSTimeXer(LightningModule):
             self,
             outputs: Tensor,
             batch_y: Tensor,
+            batch_y_sol: Optional[Tensor] = None,
+            batch_y_obj: Optional[Tensor] = None,
             *args: Tensor,
             **kwargs: Tensor,
-    ) -> tuple[Tensor, Tensor]:
+    ) -> tuple[Tensor, Tensor, Optional[Tensor], Optional[Tensor]]:
         # Re-scale prices to original prices for correct optimization.
         if self.scaler and self.inverse:
             outputs, batch_y = [self._rescale_predictions(tensor) for tensor in (outputs, batch_y)]
         preds_prices, true_prices = [tensor[:, :, self.f_dim] for tensor in [outputs, batch_y]]
-        return preds_prices, true_prices
+        return preds_prices, true_prices, batch_y_sol, batch_y_obj
 
     def configure_optimizers(self):
         trainable_params = filter(lambda p: p.requires_grad, self.parameters())
@@ -217,24 +219,38 @@ class BESSTimeXer(LightningModule):
         return outputs
 
     def training_step(self, batch, batch_idx):
-        batch_x, batch_y, batch_x_mark, batch_y_mark = batch
+        batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
         # Do forward pass.
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate loss.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        loss_items = self.loss_fn(outputs, batch_y, batch_y_mark=batch_y_mark, flag='train')
+        loss_items = self.loss_fn(
+            outputs,
+            batch_y,
+            batch_y_mark=batch_y_mark,
+            batch_y_sol=batch_y_sol,
+            batch_y_obj=batch_y_obj,
+            flag='train'
+        )
         self.log_dict(loss_items, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
         return loss_items['train_loss']
 
     def validation_step(self, batch, batch_idx):
-        batch_x, batch_y, batch_x_mark, batch_y_mark = batch
+        batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
         # Do forward pass.
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate validation metrics.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        loss_items = self.loss_fn(outputs, batch_y, batch_y_mark=batch_y_mark, flag='val')
+        loss_items = self.loss_fn(
+            outputs,
+            batch_y,
+            batch_y_mark=batch_y_mark,
+            batch_y_sol=batch_y_sol,
+            batch_y_obj=batch_y_obj,
+            flag='val'
+        )
         metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, flag='val')
 
         # Log validation metrics.
@@ -247,13 +263,13 @@ class BESSTimeXer(LightningModule):
         return
 
     def test_step(self, batch, batch_idx):
-        batch_x, batch_y, batch_x_mark, batch_y_mark = batch
+        batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
         # Do forward pass.
         outputs = self.forward(batch_x, batch_y, batch_x_mark, batch_y_mark)
 
         # Calculate evaluation metrics.
         outputs, batch_y, batch_y_mark = self._truncate_predictions(outputs, batch_y, batch_y_mark)
-        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, flag = 'test')
+        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, batch_y_obj, flag = 'test')
 
         # Log evaluation metrics.
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
@@ -264,7 +280,7 @@ class BESSTimeXer(LightningModule):
         return
 
     def predict_step(self, batch, batch_idx):
-        batch_x, batch_y, batch_x_mark, batch_y_mark = batch
+        batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
 
         dec_inp = self._decoder_input(batch_y)
         dec_out = self.model.forecast(batch_x, batch_x_mark, dec_inp, batch_y_mark)
@@ -300,6 +316,7 @@ class BESSTimeXer(LightningModule):
             outputs: Tensor,
             batch_y: Tensor,
             batch_y_mark: Tensor,
+            batch_y_obj: Optional[Tensor] = None,
             flag: str = 'val',
     ) -> dict[str, float]:
         # Convert tensors to numpy Arrays.
@@ -311,14 +328,14 @@ class BESSTimeXer(LightningModule):
         mae, rmse, corr_f = MAE(preds, true, reduction='none'), RMSE(preds, true, reduction='none'), corr_f_metric(preds, true, reduction='none')
 
         # Align true and predicted values by hour of day, to calculate cov-e
-        preds_aligned, true_aligned = self._prepare_cove_inputs(preds, true, batch_y_mark)
-        preds_aligned, true_aligned = preds_aligned.detach().numpy(), true_aligned.detach().numpy()
+        outputs_aligned, batch_y_aligned = self._prepare_cove_inputs(outputs, batch_y, batch_y_mark)
+        preds_aligned, true_aligned = outputs_aligned.cpu().detach().numpy(), batch_y_aligned.cpu().detach().numpy()
         cov_e = cov_e_metric(preds_aligned, true_aligned)
 
         # Extract only prices from tensors and convert to numpy Arrays.
-        preds_prices, true_prices = self._prepare_spoplus_inputs(outputs, batch_y)
-        preds_prices, true_prices = preds_prices.detach().numpy(), true_prices.detach().numpy()
-        regret = regret_metric(preds_prices, true_prices, self.optModel, reduction='none')
+        preds_prices, true_prices, _, _ = self._prepare_spoplus_inputs(outputs, batch_y)
+        _regret_metric_inputs = [tensor.cpu().detach().numpy() if tensor is not None else None for tensor in [preds_prices, true_prices, batch_y_obj]]
+        regret = regret_metric(*_regret_metric_inputs, self.optModel, reduction='none')
 
         for key, metric in zip(self._eval_sample_metrics, [mae, rmse, corr_f, regret]):
             self._eval_sample_metrics[key].extend(metric)
@@ -351,7 +368,6 @@ class BESSTimeXer(LightningModule):
 
         corrs = dict()
         for key in metrics_acc.keys():
-            print(len(metrics_acc[key]))
             corrs[f'{key}<>regret_{level}_corr'] = spearmanr(metrics_acc[key], regrets_acc).statistic
 
         return corrs
