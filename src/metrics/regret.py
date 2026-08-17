@@ -4,7 +4,8 @@ from pyepo.metric import calRegret
 def regret(
         pred: ndarray,
         true: ndarray,
-        optModel
+        optModel,
+        reduction: str = 'mean'
 ):
     agg_regret = []
 
@@ -19,6 +20,7 @@ def regret(
         agg_regret.append(r)
     agg_regret = array(agg_regret)
 
-    # Reduce individual regrets to average.
-    avg_regret = mean(agg_regret)
-    return avg_regret
+    if reduction == 'none':
+        return agg_regret
+    elif reduction == 'mean':
+        return mean(agg_regret)
