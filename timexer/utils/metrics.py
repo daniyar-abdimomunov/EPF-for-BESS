@@ -11,16 +11,22 @@ def CORR(pred, true):
     return (u / d).mean(-1)
 
 
-def MAE(pred, true):
-    return np.mean(np.abs(pred - true))
+def MAE(pred, true, reduction='mean'):
+    if reduction == 'none':
+        return np.mean(np.abs(pred - true), axis=(1,2))
+    elif reduction == 'mean':
+        return np.mean(np.abs(pred - true))
 
 
-def MSE(pred, true):
-    return np.mean((pred - true) ** 2)
+def MSE(pred, true, reduction='mean'):
+    if reduction == 'none':
+        return np.mean((pred - true) ** 2, axis=(1,2))
+    elif reduction == 'mean':
+        return np.mean((pred - true) ** 2)
 
 
-def RMSE(pred, true):
-    return np.sqrt(MSE(pred, true))
+def RMSE(pred, true, reduction='mean'):
+    return np.sqrt(MSE(pred, true, reduction=reduction))
 
 
 def MAPE(pred, true):
