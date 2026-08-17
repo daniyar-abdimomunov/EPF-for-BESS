@@ -1,5 +1,7 @@
 from argparse import Namespace
 from lightning import LightningModule
+from numpy import mean
+from scipy.stats import spearmanr
 from torch import argsort, cat, from_numpy, take_along_dim, Tensor, zeros_like
 from torch.nn import L1Loss, Module
 from torch.optim import Adam
@@ -56,6 +58,20 @@ class BESSTimeXer(LightningModule):
         self.penalty_lambda = penalty_lambda
         self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name, self.penalty_lambda)
         self.current_phase = 'pretrain'
+
+        self._eval_sample_metrics = {
+            'mae': [],
+            'rmse': [],
+            'corr-f': [],
+            'regret': [],
+        }
+        self._eval_batch_metrics = {
+            'mae': [],
+            'rmse': [],
+            'corr-f': [],
+            'cov-e': [],
+            'regret': [],
+        }
         return
 
     def _construct_loss_fn(self, loss_name: str, penalty_name: Optional[str], penalty_lambda: Optional[float]):
@@ -223,6 +239,10 @@ class BESSTimeXer(LightningModule):
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
 
+    def on_validation_epoch_end(self):
+        self._on_eval_epoch_end(flag='val')
+        return
+
     def test_step(self, batch, batch_idx):
         batch_x, batch_y, batch_x_mark, batch_y_mark = batch
         # Do forward pass.
@@ -235,6 +255,10 @@ class BESSTimeXer(LightningModule):
         # Log evaluation metrics.
         self.log_dict(metrics, on_step=False, on_epoch=True, prog_bar=True)
         return metrics
+
+    def on_test_epoch_end(self):
+        self._on_eval_epoch_end(flag='test')
+        return
 
     def predict_step(self, batch, batch_idx):
         batch_x, batch_y, batch_x_mark, batch_y_mark = batch
@@ -282,7 +306,7 @@ class BESSTimeXer(LightningModule):
         ]
 
         # Calculate accuracy metrics.
-        mae, rmse, corr_f = MAE(preds, true), RMSE(preds, true), corr_f_metric(preds, true)
+        mae, rmse, corr_f = MAE(preds, true, reduction='none'), RMSE(preds, true, reduction='none'), corr_f_metric(preds, true, reduction='none')
 
         # Re-scale true and predicted values to original scale for further metrics.
         if self.scaler and self.inverse:
@@ -296,15 +320,50 @@ class BESSTimeXer(LightningModule):
 
         # Extract only prices from tensors and convert to numpy Arrays.
         preds_prices, true_prices = [ tensor[:, :, -1].cpu().detach().numpy() for tensor in (outputs, batch_y) ]
-        regret = regret_metric(preds_prices, true_prices, self.optModel)
+        regret = regret_metric(preds_prices, true_prices, self.optModel, reduction='none')
 
-        return {
-            f'{flag}_mae': mae,
-            f'{flag}_rmse': rmse,
-            f'{flag}_corr_f': corr_f,
-            f'{flag}_cov_e': cov_e,
-            f'{flag}_regret': regret,
-        }
+        for key, metric in zip(self._eval_sample_metrics, [mae, rmse, corr_f, regret]):
+            self._eval_sample_metrics[key].extend(metric)
+
+        metrics = dict()
+        for key, metric in zip(self._eval_batch_metrics, [mae, rmse, corr_f, cov_e, regret]):
+            batch_metric = mean(metric)
+            self._eval_batch_metrics[key].append(batch_metric)
+            metrics[f'{flag}_{key}'] = batch_metric
+
+        return metrics
+
+    def _on_eval_epoch_end(self, flag = 'val'):
+        metric_corrs = dict()
+        sample_corrs = self._calculate_metric_correlations(level='sample')
+        metric_corrs.update(sample_corrs)
+
+        batch_corrs = self._calculate_metric_correlations(level='batch')
+        metric_corrs.update(batch_corrs)
+
+        self._clear_metrics_acc()
+
+        metric_corrs = dict((f"{flag}_{k}", v) for k, v in metric_corrs.items())
+        self.log_dict(metric_corrs, on_step=False, on_epoch=True, prog_bar=True)
+        return
+
+    def _calculate_metric_correlations(self, level: str = 'batch'):
+        metrics_acc = self._eval_batch_metrics.copy() if level == 'batch' else self._eval_sample_metrics.copy()
+        regrets_acc = metrics_acc.pop('regret')
+
+        corrs = dict()
+        for key in metrics_acc.keys():
+            print(len(metrics_acc[key]))
+            corrs[f'{key}<>regret_{level}_corr'] = spearmanr(metrics_acc[key], regrets_acc).statistic
+
+        return corrs
+
+    def _clear_metrics_acc(self):
+        for key in self._eval_sample_metrics.keys():
+            self._eval_sample_metrics[key].clear()
+        for key in self._eval_batch_metrics.keys():
+            self._eval_batch_metrics[key].clear()
+        return
 
     def _rescale_predictions(self, tensor: Tensor) -> Tensor:
         mean = from_numpy(self.scaler.mean_[self.f_dim:]).to(tensor.device, dtype=tensor.dtype)

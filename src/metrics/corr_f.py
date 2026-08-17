@@ -3,6 +3,7 @@ from numpy import argsort, divide, mean, ndarray, sqrt, sum, zeros_like
 def corr_f(
         pred: ndarray,
         true: ndarray,
+        reduction: str = 'mean'
 ):
     """
     Calculate Corr-f: The average row-wise Spearman correlation
@@ -27,6 +28,7 @@ def corr_f(
     # Avoid division by zero if a target/prediction row is perfectly flat.
     rho_t = divide(numerator, denominator, out=zeros_like(numerator), where=denominator != 0)
 
-    # Return average the correlations across all T time steps
-    corr_f = mean(rho_t)
-    return corr_f
+    if reduction == 'none':
+        return mean(rho_t, axis=1)
+    elif reduction == 'mean':
+        return mean(rho_t)
