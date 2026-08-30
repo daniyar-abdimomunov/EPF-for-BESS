@@ -15,7 +15,7 @@ BATTERY_CONFIG = {
 # DATA PARAMETERS
 # =============================================================================
 DATA_CONFIG = {
-    'root_path': '../timexer/dataset/EPF/',
+    'root_path': '../data',
     'batch_size': 35,
     'seq_len': 168,  # Lookback: 168 hours (Exactly 1 week of historical data)
     'label_len': 48,  # Overlap section used internally by specific Transformer variants
@@ -28,13 +28,32 @@ DATA_CONFIG = {
 }
 
 # =============================================================================
-# DATA (DE.csv) PARAMETERS
+# DATA (DE_LU.csv) PARAMETERS
 # =============================================================================
 DATA_DE_CONFIG = {
     **DATA_CONFIG,
-    'data_path': 'DE.csv',
-    'target': 'OT',
-    'enc_in': 3, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+    'data_path': 'DE_LU.csv',
+    'target': 'Day Ahead Auction (DE-LU)',
+    'enc_in': 5, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+}
+
+# =============================================================================
+# DATA (DK1.csv) PARAMETERS
+# =============================================================================
+DATA_DK_CONFIG = {
+    **DATA_CONFIG,
+    'data_path': 'DK1.csv',
+    'target': 'Day Ahead Auction (DK1)',
+    'enc_in': 5, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+}
+# =============================================================================
+# DATA (DE.csv) PARAMETERS
+# =============================================================================
+DATA_ES_CONFIG = {
+    **DATA_CONFIG,
+    'data_path': 'ES.csv',
+    'target': 'Day Ahead Auction (ES)',
+    'enc_in': 4, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
 }
 
 # =============================================================================
