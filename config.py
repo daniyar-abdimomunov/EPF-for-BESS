@@ -1,3 +1,5 @@
+from src.utils import TrainingMode
+
 # =============================================================================
 # BATTERY PARAMETERS
 # =============================================================================
@@ -77,4 +79,36 @@ CORR_F_PENALTY_CONFIG = {
 SPOPLUS_PENALTY_CONFIG = {
     'penalty': 'spo+',
     'penalty_lambda': 0.0001,
+}
+
+# =============================================================================
+# EXPERIMENT PARAMETERS
+# =============================================================================
+EXP_CONFIG = {
+    'ckpt_dir': '../checkpoints',
+    'experiment_name': 'BESSTimeXer',
+    'model_config': MODEL_CONFIG,
+    'battery_config': BATTERY_CONFIG,
+}
+# =============================================================================
+# PRE-TRAIN RUN PARAMETERS
+# =============================================================================
+PRETRAIN_RUN_CONFIG = {
+    'training_mode': TrainingMode.PRETRAIN,
+    'max_epochs': 10,
+}
+# =============================================================================
+# FINE-TUNE RUN PARAMETERS
+# =============================================================================
+FINETUNE_RUN_CONFIG = {
+    'training_mode': TrainingMode.FINETUNE,
+    'max_epochs': PRETRAIN_RUN_CONFIG['max_epochs'] + 5
+}
+# =============================================================================
+# TRAIN RUN PARAMETERS
+# =============================================================================
+TRAIN_RUN_CONFIG = {
+    'training_mode': TrainingMode.TRAIN,
+    'max_epochs':
+        FINETUNE_RUN_CONFIG['max_epochs']
 }
