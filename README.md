@@ -1,18 +1,15 @@
-# Title
+# Scalable Learning of BESS Schedule Optimization-Aligned Electricity Price Forecasting
 
-**Type:** Master's Thesis / Bachelor's Thesis
+**Type:** Master's Thesis
 
-**Author:** xxx
+**Author:** Daniyar Abdimomunov
 
-**Supervisor:** xxx (only if different from the 1st or the 2nd Examiner)
+**Supervisor:** Prof. Dr. Stefan Lessmann
 
-**1st Examiner:** xxx 
+**1st Examiner:** Prof. Dr. Mendling 
 
-**2nd Examiner:** xxx 
 
-[Insert here a figure explaining your approach or main results]
 
-![results](/result.png)
 
 ## Table of Content
 
@@ -21,42 +18,32 @@
     - [Dependencies](#Dependencies)
     - [Setup](#Setup)
 - [Reproducing results](#Reproducing-results)
-    - [Training code](#Training-code)
-    - [Evaluation code](#Evaluation-code)
-    - [Pretrained models](#Pretrained-models)
-- [Results](#Results)
+    - [Experiment execution](#Experiment execution)
+    - [Evaluation](#Evaluation)
 - [Project structure](-Project-structure)
 
 ## Summary
 
-(Short summary of motivation, contributions and results)
+Battery Energy Storage Systems (BESS) are becoming an increasingly important tool for managing electricity price volatility of networks with high share of renewable energy sources (RES). Decision-focused learning (DFL) methods been employed to align electricity price forecasting (EPF) with BESS scheduling decisions, shifting the learning objective form prediction accuracy to economic utility. However, standard DFL approaches often incur additional computational complexity that may prevent them from being used in more advanced, deep learning EPF architectures. To address the gap between scalable BESS-aligned learning and state-of-the-art EPF models, this study proposes assocation- and dispersion-based loss functions as a scalable alternative for DFL and conducts a comparative evaluation of their performance-efficiency trade-off. Through this evaluation, this study finds that a relaxed, composite loss based on dispersion-based Corr-f measure is able to match the downstream decision performance of the benchmark DFL approach while avoiding the additional computational burden.
 
-**Keywords**: xxx (give at least 5 keywords / phrases).
+![RegretTrainingTimeDE.png](RegretTrainingTimeDE.png)
 
-**Full text**: [include a link that points to the full text of your thesis]
-*Remark*: a thesis is about research. We believe in the [open science](https://en.wikipedia.org/wiki/Open_science) paradigm. Research results should be available to the public. Therefore, we expect dissertations to be shared publicly. Preferably, you publish your thesis via the [edoc-server of the Humboldt-Universität zu Berlin](https://edoc-info.hu-berlin.de/de/publizieren/andere). However, other sharing options, which ensure permanent availability, are also possible. <br> Exceptions from the default to share the full text of a thesis require the approval of the thesis supervisor.  
+
+**Keywords**: Electricity Price Forecasting, Battery Energy Storage Systems, Decision-focused Learning, Cov-e, Corr-f.
 
 ## Working with the repo
 
 ### Dependencies
 
-Which Python version is required? 
+Python==3.11.7
 
-Does a repository have information on dependencies or instructions on how to set up the environment?
+List of dependencies included in `requirements.txt`.
 
 ### Setup
 
-[This is an example]
+1. Clone this repository.
 
-1. Clone this repository
-
-2. Create an virtual environment and activate it
-```bash
-python -m venv thesis-env
-source thesis-env/bin/activate
-```
-
-3. Install requirements
+2. Install requirements.
 ```bash
 pip install --upgrade pip
 pip install -r requirements.txt
@@ -64,43 +51,50 @@ pip install -r requirements.txt
 
 ## Reproducing results
 
-Describe steps how to reproduce your results.
+This repository is strucutred around Python Notebooks, found under the `notebooks` directory.
+The notebooks strucutred as follows:
+- 01_bess_scheduling.ipynb: Provides an isolated example of how to solve a BESS scheduling optimization model. 
+- 02_data_preparation.ipynb: Provides an example of how to load data into a tensor Dataset and Data Loader.
+- 03_model_training.ipynb: Provides an example of how to train a single model under the MLFlow framework.
+- 04_finetuning_with_composite_losses.ipynb: Provides an example of how to finetune a pretrained model with a composite loss.
+- 05_experiment.ipynb: Provides the main parameters for the execution of the experiment.
+- 06_evlauation.ipynb: Provides tables and figures used in the paper.
 
-Here are some examples:
-- [Paperswithcode](https://github.com/paperswithcode/releasing-research-code)
-- [ML Reproducibility Checklist](https://ai.facebook.com/blog/how-the-ai-community-can-get-serious-about-reproducibility/)
-- [Simple & clear Example from Paperswithcode](https://github.com/paperswithcode/releasing-research-code/blob/master/templates/README.md) (!)
-- [Example TensorFlow](https://github.com/NVlabs/selfsupervised-denoising)
+### Experiment execution
 
-### Training code
+To reproduce the results, you must first launch the local MLFlow Tracking Server and UI by running the following command in terminal.
 
-Does a repository contain a way to train/fit the model(s) described in the paper?
+`mlflow ui`
 
-### Evaluation code
+Then you can run the 05_experiment.ipynb notebook, which will train models under the specified experiment parameters. 
+While all the experiment parameters are provided, it is best to execute the experiment runs in smaller batches due to significant training time.
 
-Does a repository contain a script to calculate the performance of the trained model(s) or run experiments on models?
+### Evaluation
 
-### Pretrained models
-
-Does a repository provide free access to pretrained model weights?
-
-## Results
-
-Does a repository contain a table/plot of main results and a script to reproduce those results?
+The results of the experiment runs are saved in `mlflow.db`. The evaluation of the results can be found in `06_evaluation.ipynb`.
+To access the database, you again must first connect the local MLFlow Tracking Server by running the `mlflow uì` command in terminal.
 
 ## Project structure
 
-(Here is an example from SMART_HOME_N_ENERGY, [Appliance Level Load Prediction](https://github.com/Humboldt-WI/dissertations/tree/main/SMART_HOME_N_ENERGY/Appliance%20Level%20Load%20Prediction) dissertation)
-
 ```bash
+├── data                                            -- stores csv file, and cached solutions  
+└── notebooks
+    ├── 01_bess_scheduling.ipynb                    -- example notebook for solving optimization model
+    ├── 02_data_preparation.ipynb                   -- example notebook for loading data into tensor Dataset
+    ├── 03_model_training.ipynb                     -- example notebook for training a single model 
+    ├── 04_finetuning_with_composite_losses.ipynb   -- example notebook for finetuning a pretrained model
+    └── 05_experiment.ipynb                         -- notebook for executing experiment
+    └── 06_evaluation.ipynb                         -- notebook for tables and figures
+└──  src
+    ├── exp                                         -- experiment functions
+    ├── evaluation                                  -- evaluation helper functions
+    ├── losses                                      -- loss functions
+    ├── metrics                                     -- evaluation metrics
+    └── models                                      -- models 
+    └── utils                                       -- dataset objects, and optimization model  
+├── timexer                                         -- imported library for TimeXer model
+├── config.py                                       -- configuration file for
+├── mlflow.db                                       -- database with experiment results
 ├── README.md
-├── requirements.txt                                -- required libraries
-├── data                                            -- stores csv file 
-├── plots                                           -- stores image files
-└── src
-    ├── prepare_source_data.ipynb                   -- preprocesses data
-    ├── data_preparation.ipynb                      -- preparing datasets
-    ├── model_tuning.ipynb                          -- tuning functions
-    └── run_experiment.ipynb                        -- run experiments 
-    └── plots                                       -- plotting functions                 
+└── requirements.txt                                -- required libraries               
 ```
