@@ -1,7 +1,9 @@
 from argparse import Namespace
 from lightning import LightningModule
 from numpy import mean
+import psutil
 from scipy.stats import spearmanr
+from time import time
 from torch import argsort, cat, from_numpy, take_along_dim, Tensor, zeros_like
 from torch.nn import L1Loss, Module
 from torch.optim import Adam
@@ -62,6 +64,7 @@ class BESSTimeXer(LightningModule):
         self.loss_fn, self.criterion, self.penalty = self._construct_loss_fn(self.loss_name, self.penalty_name, self.penalty_lambda)
         self.current_phase = TrainingMode.TRAIN
 
+        self.epoch_start_time = 0
         self._eval_sample_metrics = {
             'mae': [],
             'rmse': [],
@@ -218,6 +221,9 @@ class BESSTimeXer(LightningModule):
             outputs = self.model(batch_x, batch_x_mark, dec_inp, batch_y_mark)
         return outputs
 
+    def on_train_epoch_start(self):
+        self.epoch_start_time = time()
+
     def training_step(self, batch, batch_idx):
         batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
         # Do forward pass.
@@ -236,6 +242,14 @@ class BESSTimeXer(LightningModule):
         self.log_dict(loss_items, on_step=True, on_epoch=True, prog_bar=True, enable_graph=True)
         return loss_items['train_loss']
 
+    def on_validation_epoch_start(self):
+        trian_epoch_metrics = {
+            'epoch_train_duration_sec': time() - self.epoch_start_time,
+            'cpu_percent': psutil.cpu_percent(),
+            'memory_percent': psutil.virtual_memory().percent,
+        }
+        self.log_dict(trian_epoch_metrics, on_step=False, on_epoch=True)
+
     def validation_step(self, batch, batch_idx):
         batch_x, batch_y, batch_x_mark, batch_y_mark, batch_y_sol, batch_y_obj = batch
         # Do forward pass.
@@ -251,7 +265,7 @@ class BESSTimeXer(LightningModule):
             batch_y_obj=batch_y_obj,
             flag='val'
         )
-        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, flag='val')
+        metrics = self._shared_eval_step(outputs, batch_y, batch_y_mark, batch_y_obj, flag='val')
 
         # Log validation metrics.
         metrics.update(loss_items)
