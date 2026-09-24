@@ -1,0 +1,133 @@
+from src.utils import TrainingMode
+
+# =============================================================================
+# BATTERY PARAMETERS
+# =============================================================================
+BATTERY_CONFIG = {
+    'Pow': 30, # in MW
+    'E': 100, # in MWh
+    'eta_ch': 0.92,
+    'eta_dis': 0.92,
+    'C': 2.5, # EUR/MWh
+}
+
+# =============================================================================
+# DATA PARAMETERS
+# =============================================================================
+DATA_CONFIG = {
+    'root_path': '../data',
+    'batch_size': 35,
+    'seq_len': 168,  # Lookback: 168 hours (Exactly 1 week of historical data)
+    'label_len': 48,  # Overlap section used internally by specific Transformer variants
+    'pred_len': 24,  # Horizon: 24 hours (Predict next day's electricity prices)
+    'features': 'MS',
+    'embed': 'timeF',
+    'freq': 'h',
+    'num_workers': 4,
+    'augmentation_ratio': 0,
+}
+
+# =============================================================================
+# DATA (DE_LU.csv) PARAMETERS
+# =============================================================================
+DATA_DE_CONFIG = {
+    **DATA_CONFIG,
+    'data_path': 'DE_LU.csv',
+    'target': 'Day Ahead Auction (DE-LU)',
+    'enc_in': 5, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+}
+
+# =============================================================================
+# DATA (DK1.csv) PARAMETERS
+# =============================================================================
+DATA_DK_CONFIG = {
+    **DATA_CONFIG,
+    'data_path': 'DK1.csv',
+    'target': 'Day Ahead Auction (DK1)',
+    'enc_in': 5, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+}
+# =============================================================================
+# DATA (DE.csv) PARAMETERS
+# =============================================================================
+DATA_ES_CONFIG = {
+    **DATA_CONFIG,
+    'data_path': 'ES.csv',
+    'target': 'Day Ahead Auction (ES)',
+    'enc_in': 4, # Number of input variables (e.g., Target Price + 5 Exogenous features), default=7
+}
+
+# =============================================================================
+# MODEL PARAMETERS
+# =============================================================================
+MODEL_CONFIG = {
+    'inverse': True,
+    'output_attention': False,
+    'loss': 'mae',
+    'task_name': 'long_term_forecast',  # Primary mode for sequential prediction
+    'use_norm': 1, # Boolean value for normalization
+    'patch_len': 24,  # Patch size: 24 (Matches the 24h daily price cycle), default = 16
+    'd_model': 512,  # d_model=64, # Dimension size for core embeddings, default=512
+    'dropout': 0.1,  # Dropout rate to combat overfitting
+    'factor': 1,  # ProbSparse attention probing factor, default = 1
+    'n_heads': 8,  # Attention heads, default = 8
+    'd_ff': 2048,  #d_ff=128,  # Dimension size of feed-forward layers, default = 2048
+    'activation':'gelu',  # Activation function mapping
+    'e_layers': 2,  # Number of encoder processing layers
+    'learning_rate': 1e-4,
+}
+
+# =============================================================================
+# COV-E PENALISED MODEL PARAMETERS
+# =============================================================================
+COV_E_PENALTY_CONFIG = {
+    'penalty': 'cov-e',
+    'penalty_lambda': 0.001,
+}
+
+# =============================================================================
+# CORR-F PENALISED MODEL PARAMETERS
+# =============================================================================
+CORR_F_PENALTY_CONFIG = {
+    'penalty': 'corr-f',
+    'penalty_lambda': 1,
+}
+
+# =============================================================================
+# SPOPLUS PENALISED MODEL PARAMETERS
+# =============================================================================
+SPOPLUS_PENALTY_CONFIG = {
+    'penalty': 'spo+',
+    'penalty_lambda': 0.0001,
+}
+
+# =============================================================================
+# EXPERIMENT PARAMETERS
+# =============================================================================
+EXP_CONFIG = {
+    'ckpt_dir': '../checkpoints',
+    'experiment_name': 'BESSTimeXer',
+    'model_config': MODEL_CONFIG,
+    'battery_config': BATTERY_CONFIG,
+}
+# =============================================================================
+# PRE-TRAIN RUN PARAMETERS
+# =============================================================================
+PRETRAIN_RUN_CONFIG = {
+    'training_mode': TrainingMode.PRETRAIN,
+    'max_epochs': 10,
+}
+# =============================================================================
+# FINE-TUNE RUN PARAMETERS
+# =============================================================================
+FINETUNE_RUN_CONFIG = {
+    'training_mode': TrainingMode.FINETUNE,
+    'max_epochs': PRETRAIN_RUN_CONFIG['max_epochs'] + 5
+}
+# =============================================================================
+# TRAIN RUN PARAMETERS
+# =============================================================================
+TRAIN_RUN_CONFIG = {
+    'training_mode': TrainingMode.TRAIN,
+    'max_epochs':
+        FINETUNE_RUN_CONFIG['max_epochs']
+}
