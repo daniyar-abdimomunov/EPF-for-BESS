@@ -13,5 +13,6 @@ pyomo
 reformer_pytorch
 scikit-learn
 sktime
+statsmodels
 torch
 tqdm
